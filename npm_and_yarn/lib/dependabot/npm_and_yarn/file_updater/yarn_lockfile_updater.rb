@@ -221,11 +221,12 @@ module Dependabot
           # the lockfile.
 
           if top_level_dependency_updates.all? { |dep| requirements_changed?(dep[:name]) }
-            # Inject resolutions into the temporary package.json to pin each
-            # dependency to its exact target version. Without this, yarn resolves
-            # ranges like `^1.15.2` to the latest satisfying version (e.g., 1.16.x)
-            # instead of the intended target (1.15.2).
-            inject_berry_resolutions(top_level_dependency_updates)
+            # Pin exact resolutions for dependencies with specific target versions
+            # to prevent yarn from resolving to the latest version in the range.
+            # This is critical for security updates where the target is the minimum
+            # safe version (e.g., 1.15.2) but yarn would otherwise resolve to the
+            # latest satisfying version (e.g., 1.16.x).
+            pin_berry_resolutions(top_level_dependency_updates)
             Helpers.run_yarn_command("install #{yarn_berry_args}".strip)
           else
             updates = top_level_dependency_updates.collect do |dep|
@@ -248,39 +249,26 @@ module Dependabot
           dep.requirements != dep.previous_requirements
         end
 
-        # Injects a `resolutions` field into the root temporary package.json
-        # to pin each dependency to its exact target version. Yarn berry reads
-        # this field during `yarn install` and enforces the specified versions.
-        # Only the root package.json is modified because yarn berry only honors
-        # `resolutions` at the workspace root level.
-        # The temporary package.json is never returned to the customer — only
-        # the lockfile content is used.
+        # Uses `yarn set resolution` to pin each dependency to its exact target
+        # version before running `yarn install`. Without this, yarn resolves
+        # ranges like `^1.15.2` to the latest satisfying version (e.g., 1.16.x)
+        # instead of the intended target (1.15.2).
         sig { params(top_level_dependency_updates: T::Array[T::Hash[Symbol, T.untyped]]).void }
-        def inject_berry_resolutions(top_level_dependency_updates)
-          resolutions = berry_resolutions_from(top_level_dependency_updates)
-          return if resolutions.empty?
-
-          root_package = package_files.find { |f| f.name == "package.json" }
-          return unless root_package && File.exist?(root_package.name)
-
-          json = JSON.parse(File.read(root_package.name))
-          json["resolutions"] = (json["resolutions"] || {}).merge(resolutions)
-          File.write(root_package.name, JSON.pretty_generate(json) + "\n")
-        end
-
-        sig { params(updates: T::Array[T::Hash[Symbol, T.untyped]]).returns(T::Hash[String, String]) }
-        def berry_resolutions_from(updates)
-          resolutions = T.let({}, T::Hash[String, String])
-
-          updates.each do |dep|
+        def pin_berry_resolutions(top_level_dependency_updates)
+          top_level_dependency_updates.each do |dep|
             version = dep[:version]
             next unless version
             next if dep[:requirements]&.any? { |req| req[:source] && req[:source][:type] == "git" }
 
-            resolutions[T.cast(dep[:name], String)] = T.cast(version, String)
-          end
+            dep_name = T.cast(dep[:name], String)
+            requirement = dep[:requirements]&.first&.dig(:requirement)
+            next unless requirement
 
-          resolutions
+            Helpers.run_yarn_command(
+              "set resolution \"#{dep_name}@npm:#{requirement}\" \"npm:#{version}\"",
+              fingerprint: "set resolution <descriptor> <resolution>"
+            )
+          end
         end
 
         sig { params(yarn_lock: Dependabot::DependencyFile).returns(T::Hash[String, String]) }

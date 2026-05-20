@@ -393,7 +393,7 @@ RSpec.describe Dependabot::NpmAndYarn::FileUpdater::YarnLockfileUpdater do
     end
   end
 
-  describe "#inject_berry_resolutions" do
+  describe "#pin_berry_resolutions" do
     let(:files) { project_dependency_files("yarn_berry/security_update") }
     let(:dependency_name) { "axios" }
     let(:version) { "1.15.2" }
