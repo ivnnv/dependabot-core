@@ -392,4 +392,81 @@ RSpec.describe Dependabot::NpmAndYarn::FileUpdater::YarnLockfileUpdater do
       updated_yarn_lock_content
     end
   end
+
+  describe "#pin_berry_resolutions" do
+    let(:files) { project_dependency_files("yarn_berry/security_update") }
+    let(:dependency_name) { "axios" }
+    let(:version) { "1.15.2" }
+    let(:previous_version) { "1.15.0" }
+    let(:requirements) do
+      [{
+        file: "package.json",
+        requirement: "^1.15.2",
+        groups: ["dependencies"],
+        source: nil
+      }]
+    end
+    let(:previous_requirements) do
+      [{
+        file: "package.json",
+        requirement: "^1.15.0",
+        groups: ["dependencies"],
+        source: nil
+      }]
+    end
+
+    it "pins the resolution to the exact target version" do
+      # The lockfile should resolve axios to exactly 1.15.2, not latest (1.16.x)
+      expect(updated_yarn_lock_content).to include('"axios@npm:^1.15.2"')
+      expect(updated_yarn_lock_content).to include("version: 1.15.2")
+      expect(updated_yarn_lock_content).to include("resolution: \"axios@npm:1.15.2\"")
+      expect(updated_yarn_lock_content).not_to include("version: 1.16")
+    end
+
+    context "when the dependency is a git source" do
+      let(:requirements) do
+        [{
+          file: "package.json",
+          requirement: "^1.15.2",
+          groups: ["dependencies"],
+          source: { type: "git", url: "https://github.com/axios/axios", ref: "v1.15.2" }
+        }]
+      end
+      let(:previous_requirements) do
+        [{
+          file: "package.json",
+          requirement: "^1.15.0",
+          groups: ["dependencies"],
+          source: { type: "git", url: "https://github.com/axios/axios", ref: "v1.15.0" }
+        }]
+      end
+
+      it "skips resolution pinning for git dependencies" do
+        expect(Dependabot::NpmAndYarn::Helpers).not_to receive(:run_yarn_command)
+          .with(a_string_matching(/set resolution/), anything)
+
+        # Allow other yarn commands (install, etc.)
+        allow(Dependabot::NpmAndYarn::Helpers).to receive(:run_yarn_command)
+          .and_call_original
+
+        # Git dependencies won't resolve with this fixture, so we just verify
+        # the set resolution command is not called
+        expect { updated_yarn_lock_content }.to raise_error(StandardError)
+      end
+    end
+
+    context "when the dependency is not found in the lockfile" do
+      let(:dependency_name) { "nonexistent-package" }
+
+      it "skips resolution pinning when protocol cannot be determined" do
+        expect(Dependabot::NpmAndYarn::Helpers).not_to receive(:run_yarn_command)
+          .with(a_string_matching(/set resolution/), anything)
+
+        allow(Dependabot::NpmAndYarn::Helpers).to receive(:run_yarn_command)
+          .and_call_original
+
+        expect { updated_yarn_lock_content }.to raise_error(StandardError)
+      end
+    end
+  end
 end

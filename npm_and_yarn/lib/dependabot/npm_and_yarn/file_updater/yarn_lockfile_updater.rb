@@ -221,6 +221,12 @@ module Dependabot
           # the lockfile.
 
           if top_level_dependency_updates.all? { |dep| requirements_changed?(dep[:name]) }
+            # Pin exact resolutions for dependencies with specific target versions
+            # to prevent yarn from resolving to the latest version in the range.
+            # This is critical for security updates where the target is the minimum
+            # safe version (e.g., 1.15.2) but yarn would otherwise resolve to the
+            # latest satisfying version (e.g., 1.16.x).
+            pin_berry_resolutions(top_level_dependency_updates)
             Helpers.run_yarn_command("install #{yarn_berry_args}".strip)
           else
             updates = top_level_dependency_updates.collect do |dep|
@@ -241,6 +247,59 @@ module Dependabot
           return false unless dep
 
           dep.requirements != dep.previous_requirements
+        end
+
+        # Use `yarn set resolution` to pin each dependency to its exact target
+        # version before running `yarn install`. Without this, yarn resolves
+        # ranges like `^1.15.2` to the latest satisfying version (e.g., 1.16.x)
+        # instead of the intended target (1.15.2).
+        sig { params(top_level_dependency_updates: T::Array[T::Hash[Symbol, T.untyped]]).void }
+        def pin_berry_resolutions(top_level_dependency_updates)
+          top_level_dependency_updates.each do |dep|
+            version = dep[:version]
+            next unless version
+
+            req = dep[:requirements]&.first
+            next unless req
+
+            requirement = req[:requirement]
+            next unless requirement
+            # Skip git dependencies — they pin to a commit/tag and don't have
+            # the range-resolution problem.
+            next if req[:source] && req[:source][:type] == "git"
+
+            protocol = berry_protocol_for(dep[:name])
+            next unless protocol
+
+            descriptor = "#{dep[:name]}@#{protocol}#{requirement}"
+            resolution = "#{protocol}#{version}"
+            Helpers.run_yarn_command(
+              "set resolution #{descriptor} #{resolution}",
+              fingerprint: "set resolution <descriptor> <resolution>"
+            )
+          end
+        end
+
+        # Reads the yarn berry descriptor protocol for a dependency from the
+        # existing lockfile. Yarn berry uses protocols like `npm:` for registry
+        # packages and `workspace:` for local packages.
+        # Returns nil if the dependency is not found in any lockfile.
+        sig { params(dep_name: String).returns(T.nilable(String)) }
+        def berry_protocol_for(dep_name)
+          yarn_locks.each do |lockfile|
+            content = if File.exist?(lockfile.name)
+                        File.read(lockfile.name)
+                      else
+                        lockfile.content
+                      end
+            next unless content
+
+            # Match entries like "axios@npm:^1.15.0": to extract "npm:"
+            match = content.match(/^"#{Regexp.escape(dep_name)}@([a-z]+:)/)
+            return T.must(match[1]) if match
+          end
+
+          nil
         end
 
         sig { params(yarn_lock: Dependabot::DependencyFile).returns(T::Hash[String, String]) }
