@@ -3038,6 +3038,38 @@ RSpec.describe Dependabot::NpmAndYarn::FileUpdater do
             .to include(%("acorn@npm:^5.0.0, acorn@npm:^5.1.2":\n  version: 5.7.3))
         end
       end
+
+      context "with a security update that pins to exact target version" do
+        let(:project_name) { "yarn_berry/security_update" }
+        let(:files) { project_dependency_files(project_name) }
+        let(:repo_contents_path) { build_tmp_repo(project_name, path: "projects") }
+
+        let(:dependency_name) { "axios" }
+        let(:version) { "1.15.2" }
+        let(:previous_version) { "1.15.0" }
+        let(:requirements) do
+          [{
+            file: "package.json",
+            requirement: "^1.15.2",
+            groups: ["dependencies"],
+            source: nil
+          }]
+        end
+        let(:previous_requirements) do
+          [{
+            file: "package.json",
+            requirement: "^1.15.0",
+            groups: ["dependencies"],
+            source: nil
+          }]
+        end
+
+        it "resolves to the exact target version, not the latest in range" do
+          parsed_lockfile = YAML.safe_load(updated_yarn_lock.content)
+          axios_entry = parsed_lockfile.find { |k, _| k.include?("axios") }&.last
+          expect(axios_entry["version"]).to eq("1.15.2")
+        end
+      end
     end
 
     #######################

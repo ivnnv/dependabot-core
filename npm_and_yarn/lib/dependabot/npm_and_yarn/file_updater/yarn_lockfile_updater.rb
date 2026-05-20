@@ -256,19 +256,29 @@ module Dependabot
         sig { params(top_level_dependency_updates: T::Array[T::Hash[Symbol, T.untyped]]).void }
         def pin_berry_resolutions(top_level_dependency_updates)
           top_level_dependency_updates.each do |dep|
-            version = dep[:version]
-            next unless version
-            next if dep[:requirements]&.any? { |req| req[:source] && req[:source][:type] == "git" }
-
-            dep_name = T.cast(dep[:name], String)
-            requirement = dep[:requirements]&.first&.dig(:requirement)
-            next unless requirement
-
-            Helpers.run_yarn_command(
-              "set resolution \"#{dep_name}@npm:#{requirement}\" \"npm:#{version}\"",
-              fingerprint: "set resolution <descriptor> <resolution>"
-            )
+            pin_berry_resolution(dep)
           end
+        end
+
+        # Pins a single dependency to its exact target version using
+        # `yarn set resolution`. Falls back gracefully if pinning fails
+        # (e.g., misconfigured project) rather than blocking the update.
+        sig { params(dep: T::Hash[Symbol, T.untyped]).void }
+        def pin_berry_resolution(dep)
+          version = dep[:version]
+          return unless version
+          return if dep[:requirements]&.any? { |req| req[:source] && req[:source][:type] == "git" }
+
+          dep_name = T.cast(dep[:name], String)
+          requirement = dep[:requirements]&.first&.dig(:requirement)
+          return unless requirement
+
+          Helpers.run_yarn_command(
+            "set resolution \"#{dep_name}@npm:#{requirement}\" \"npm:#{version}\"",
+            fingerprint: "set resolution <descriptor> <resolution>"
+          )
+        rescue SharedHelpers::HelperSubprocessFailed => e
+          Dependabot.logger.warn("Failed to pin resolution for #{dep_name}: #{e.message}")
         end
 
         sig { params(yarn_lock: Dependabot::DependencyFile).returns(T::Hash[String, String]) }
