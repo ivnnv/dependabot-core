@@ -254,7 +254,7 @@ module Dependabot
         # ranges like `^1.15.2` to the latest satisfying version (e.g., 1.16.x)
         # instead of the intended target (1.15.2).
         sig { params(top_level_dependency_updates: T::Array[T::Hash[Symbol, T.untyped]]).void }
-        def pin_berry_resolutions(top_level_dependency_updates)
+        def pin_berry_resolutions(top_level_dependency_updates) # rubocop:disable Metrics/PerceivedComplexity
           protocol_cache = T.let({}, T::Hash[String, T.nilable(String)])
 
           top_level_dependency_updates.each do |dep|
@@ -264,7 +264,9 @@ module Dependabot
             requirements = dep[:requirements]
             next if requirements.nil? || requirements.empty?
 
-            protocol = protocol_cache[dep[:name]] ||= berry_protocol_for(dep[:name])
+            dep_name = T.cast(dep[:name], String)
+            protocol_cache[dep_name] = berry_protocol_for(dep_name) unless protocol_cache.key?(dep_name)
+            protocol = protocol_cache[dep_name]
             next unless protocol
 
             requirements.each do |req|
@@ -274,7 +276,7 @@ module Dependabot
               # the range-resolution problem.
               next if req[:source] && req[:source][:type] == "git"
 
-              descriptor = "#{dep[:name]}@#{protocol}#{requirement}"
+              descriptor = "#{dep_name}@#{protocol}#{requirement}"
               resolution = "#{protocol}#{version}"
               Helpers.run_yarn_command(
                 "set resolution #{descriptor} #{resolution}",
