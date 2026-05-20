@@ -443,15 +443,14 @@ RSpec.describe Dependabot::NpmAndYarn::FileUpdater::YarnLockfileUpdater do
 
       it "skips resolution pinning for git dependencies" do
         expect(Dependabot::NpmAndYarn::Helpers).not_to receive(:run_yarn_command)
-          .with(a_string_matching(/set resolution/), anything)
+          .with(a_string_matching(/set resolution/), fingerprint: anything)
 
-        # Allow other yarn commands (install, etc.)
         allow(Dependabot::NpmAndYarn::Helpers).to receive(:run_yarn_command)
           .and_call_original
 
         # Git dependencies won't resolve with this fixture, so we just verify
         # the set resolution command is not called
-        expect { updated_yarn_lock_content }.to raise_error(StandardError)
+        expect { updated_yarn_lock_content }.to raise_error(Dependabot::SharedHelpers::HelperSubprocessFailed)
       end
     end
 
@@ -460,12 +459,12 @@ RSpec.describe Dependabot::NpmAndYarn::FileUpdater::YarnLockfileUpdater do
 
       it "skips resolution pinning when protocol cannot be determined" do
         expect(Dependabot::NpmAndYarn::Helpers).not_to receive(:run_yarn_command)
-          .with(a_string_matching(/set resolution/), anything)
+          .with(a_string_matching(/set resolution/), fingerprint: anything)
 
         allow(Dependabot::NpmAndYarn::Helpers).to receive(:run_yarn_command)
           .and_call_original
 
-        expect { updated_yarn_lock_content }.to raise_error(StandardError)
+        expect { updated_yarn_lock_content }.to raise_error(Dependabot::SharedHelpers::HelperSubprocessFailed)
       end
     end
   end

@@ -255,28 +255,32 @@ module Dependabot
         # instead of the intended target (1.15.2).
         sig { params(top_level_dependency_updates: T::Array[T::Hash[Symbol, T.untyped]]).void }
         def pin_berry_resolutions(top_level_dependency_updates)
+          protocol_cache = T.let({}, T::Hash[String, T.nilable(String)])
+
           top_level_dependency_updates.each do |dep|
             version = dep[:version]
             next unless version
 
-            req = dep[:requirements]&.first
-            next unless req
+            requirements = dep[:requirements]
+            next if requirements.nil? || requirements.empty?
 
-            requirement = req[:requirement]
-            next unless requirement
-            # Skip git dependencies — they pin to a commit/tag and don't have
-            # the range-resolution problem.
-            next if req[:source] && req[:source][:type] == "git"
-
-            protocol = berry_protocol_for(dep[:name])
+            protocol = protocol_cache[dep[:name]] ||= berry_protocol_for(dep[:name])
             next unless protocol
 
-            descriptor = "#{dep[:name]}@#{protocol}#{requirement}"
-            resolution = "#{protocol}#{version}"
-            Helpers.run_yarn_command(
-              "set resolution #{descriptor} #{resolution}",
-              fingerprint: "set resolution <descriptor> <resolution>"
-            )
+            requirements.each do |req|
+              requirement = req[:requirement]
+              next unless requirement
+              # Skip git dependencies — they pin to a commit/tag and don't have
+              # the range-resolution problem.
+              next if req[:source] && req[:source][:type] == "git"
+
+              descriptor = "#{dep[:name]}@#{protocol}#{requirement}"
+              resolution = "#{protocol}#{version}"
+              Helpers.run_yarn_command(
+                "set resolution #{descriptor} #{resolution}",
+                fingerprint: "set resolution <descriptor> <resolution>"
+              )
+            end
           end
         end
 
