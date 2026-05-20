@@ -221,12 +221,11 @@ module Dependabot
           # the lockfile.
 
           if top_level_dependency_updates.all? { |dep| requirements_changed?(dep[:name]) }
-            # Pin exact resolutions for dependencies with specific target versions
-            # to prevent yarn from resolving to the latest version in the range.
-            # This is critical for security updates where the target is the minimum
-            # safe version (e.g., 1.15.2) but yarn would otherwise resolve to the
-            # latest satisfying version (e.g., 1.16.x).
-            pin_berry_resolutions(top_level_dependency_updates)
+            # Inject resolutions into the temporary package.json to pin each
+            # dependency to its exact target version. Without this, yarn resolves
+            # ranges like `^1.15.2` to the latest satisfying version (e.g., 1.16.x)
+            # instead of the intended target (1.15.2).
+            inject_berry_resolutions(top_level_dependency_updates)
             Helpers.run_yarn_command("install #{yarn_berry_args}".strip)
           else
             updates = top_level_dependency_updates.collect do |dep|
@@ -249,63 +248,39 @@ module Dependabot
           dep.requirements != dep.previous_requirements
         end
 
-        # Use `yarn set resolution` to pin each dependency to its exact target
-        # version before running `yarn install`. Without this, yarn resolves
-        # ranges like `^1.15.2` to the latest satisfying version (e.g., 1.16.x)
-        # instead of the intended target (1.15.2).
+        # Injects a `resolutions` field into the root temporary package.json
+        # to pin each dependency to its exact target version. Yarn berry reads
+        # this field during `yarn install` and enforces the specified versions.
+        # Only the root package.json is modified because yarn berry only honors
+        # `resolutions` at the workspace root level.
+        # The temporary package.json is never returned to the customer — only
+        # the lockfile content is used.
         sig { params(top_level_dependency_updates: T::Array[T::Hash[Symbol, T.untyped]]).void }
-        def pin_berry_resolutions(top_level_dependency_updates) # rubocop:disable Metrics/PerceivedComplexity
-          protocol_cache = T.let({}, T::Hash[String, T.nilable(String)])
+        def inject_berry_resolutions(top_level_dependency_updates)
+          resolutions = berry_resolutions_from(top_level_dependency_updates)
+          return if resolutions.empty?
 
-          top_level_dependency_updates.each do |dep|
-            version = dep[:version]
-            next unless version
+          root_package = package_files.find { |f| f.name == "package.json" }
+          return unless root_package && File.exist?(root_package.name)
 
-            requirements = dep[:requirements]
-            next if requirements.nil? || requirements.empty?
-
-            dep_name = T.cast(dep[:name], String)
-            protocol_cache[dep_name] = berry_protocol_for(dep_name) unless protocol_cache.key?(dep_name)
-            protocol = protocol_cache[dep_name]
-            next unless protocol
-
-            requirements.each do |req|
-              requirement = req[:requirement]
-              next unless requirement
-              # Skip git dependencies — they pin to a commit/tag and don't have
-              # the range-resolution problem.
-              next if req[:source] && req[:source][:type] == "git"
-
-              descriptor = "#{dep_name}@#{protocol}#{requirement}"
-              resolution = "#{protocol}#{version}"
-              Helpers.run_yarn_command(
-                "set resolution #{descriptor} #{resolution}",
-                fingerprint: "set resolution <descriptor> <resolution>"
-              )
-            end
-          end
+          json = JSON.parse(File.read(root_package.name))
+          json["resolutions"] = (json["resolutions"] || {}).merge(resolutions)
+          File.write(root_package.name, JSON.pretty_generate(json) + "\n")
         end
 
-        # Reads the yarn berry descriptor protocol for a dependency from the
-        # existing lockfile. Yarn berry uses protocols like `npm:` for registry
-        # packages and `workspace:` for local packages.
-        # Returns nil if the dependency is not found in any lockfile.
-        sig { params(dep_name: String).returns(T.nilable(String)) }
-        def berry_protocol_for(dep_name)
-          yarn_locks.each do |lockfile|
-            content = if File.exist?(lockfile.name)
-                        File.read(lockfile.name)
-                      else
-                        lockfile.content
-                      end
-            next unless content
+        sig { params(updates: T::Array[T::Hash[Symbol, T.untyped]]).returns(T::Hash[String, String]) }
+        def berry_resolutions_from(updates)
+          resolutions = T.let({}, T::Hash[String, String])
 
-            # Match entries like "axios@npm:^1.15.0": to extract "npm:"
-            match = content.match(/^"#{Regexp.escape(dep_name)}@([a-z]+:)/)
-            return T.must(match[1]) if match
+          updates.each do |dep|
+            version = dep[:version]
+            next unless version
+            next if dep[:requirements]&.any? { |req| req[:source] && req[:source][:type] == "git" }
+
+            resolutions[T.cast(dep[:name], String)] = T.cast(version, String)
           end
 
-          nil
+          resolutions
         end
 
         sig { params(yarn_lock: Dependabot::DependencyFile).returns(T::Hash[String, String]) }

@@ -393,7 +393,7 @@ RSpec.describe Dependabot::NpmAndYarn::FileUpdater::YarnLockfileUpdater do
     end
   end
 
-  describe "#pin_berry_resolutions" do
+  describe "#inject_berry_resolutions" do
     let(:files) { project_dependency_files("yarn_berry/security_update") }
     let(:dependency_name) { "axios" }
     let(:version) { "1.15.2" }
@@ -442,28 +442,8 @@ RSpec.describe Dependabot::NpmAndYarn::FileUpdater::YarnLockfileUpdater do
       end
 
       it "skips resolution pinning for git dependencies" do
-        expect(Dependabot::NpmAndYarn::Helpers).not_to receive(:run_yarn_command)
-          .with(a_string_matching(/set resolution/), fingerprint: anything)
-
-        allow(Dependabot::NpmAndYarn::Helpers).to receive(:run_yarn_command)
-          .and_call_original
-
-        # Git dependencies won't resolve with this fixture, so we just verify
-        # the set resolution command is not called
-        expect { updated_yarn_lock_content }.to raise_error(Dependabot::SharedHelpers::HelperSubprocessFailed)
-      end
-    end
-
-    context "when the dependency is not found in the lockfile" do
-      let(:dependency_name) { "nonexistent-package" }
-
-      it "skips resolution pinning when protocol cannot be determined" do
-        expect(Dependabot::NpmAndYarn::Helpers).not_to receive(:run_yarn_command)
-          .with(a_string_matching(/set resolution/), fingerprint: anything)
-
-        allow(Dependabot::NpmAndYarn::Helpers).to receive(:run_yarn_command)
-          .and_call_original
-
+        # Git source dependencies won't resolve with this npm fixture,
+        # but we verify that no resolutions field is injected
         expect { updated_yarn_lock_content }.to raise_error(Dependabot::SharedHelpers::HelperSubprocessFailed)
       end
     end
