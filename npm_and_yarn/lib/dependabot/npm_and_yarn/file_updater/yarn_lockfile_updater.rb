@@ -261,24 +261,38 @@ module Dependabot
         end
 
         # Pins a single dependency to its exact target version using
-        # `yarn set resolution`. Falls back gracefully if pinning fails
-        # (e.g., misconfigured project) rather than blocking the update.
+        # `yarn set resolution`. Uses the previous requirement as the descriptor
+        # since it matches the existing lockfile entry. Falls back gracefully if
+        # pinning fails rather than blocking the update.
         sig { params(dep: T::Hash[Symbol, T.untyped]).void }
         def pin_berry_resolution(dep)
           version = dep[:version]
           return unless version
-          return if dep[:requirements]&.any? { |req| req[:source] && req[:source][:type] == "git" }
 
           dep_name = T.cast(dep[:name], String)
-          requirement = dep[:requirements]&.first&.dig(:requirement)
-          return unless requirement
+          prev_requirement = previous_requirement_for(dep_name)
+          return unless prev_requirement
 
           Helpers.run_yarn_command(
-            "set resolution \"#{dep_name}@npm:#{requirement}\" \"npm:#{version}\"",
+            "set resolution \"#{dep_name}@npm:#{prev_requirement}\" \"npm:#{version}\"",
             fingerprint: "set resolution <descriptor> <resolution>"
           )
         rescue SharedHelpers::HelperSubprocessFailed => e
           Dependabot.logger.warn("Failed to pin resolution for #{dep_name}: #{e.message}")
+        end
+
+        # Returns the previous requirement for a dependency, which matches the
+        # existing lockfile descriptor. Skips git dependencies since they don't
+        # have the range-resolution problem.
+        sig { params(dep_name: String).returns(T.nilable(String)) }
+        def previous_requirement_for(dep_name)
+          dependency = top_level_dependencies.find { |d| d.name == dep_name }
+          return unless dependency
+
+          prev_req = dependency.previous_requirements&.first
+          return if prev_req&.dig(:source, :type) == "git"
+
+          prev_req&.dig(:requirement)
         end
 
         sig { params(yarn_lock: Dependabot::DependencyFile).returns(T::Hash[String, String]) }
