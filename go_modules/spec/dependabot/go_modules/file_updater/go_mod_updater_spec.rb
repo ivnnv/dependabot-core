@@ -276,6 +276,34 @@ RSpec.describe Dependabot::GoModules::FileUpdater::GoModUpdater do
               .not_to include(%(rsc.io/quote v1.4.0/go.mod h1:))
           end
 
+          context "when strict go mod tidy fails and falls back to -e" do
+            before do
+              strict_failed = false
+              allow(Open3).to receive(:capture3).and_wrap_original do |original, *args|
+                if args == ["go mod tidy"] && !strict_failed
+                  strict_failed = true
+                  ["", "missing package error", instance_double(Process::Status, success?: false)]
+                else
+                  original.call(*args)
+                end
+              end
+            end
+
+            it "falls back to go mod tidy -e and still updates go.sum" do
+              expect(updated_go_mod_content)
+                .to include(%(rsc.io/quote v1.5.2 h1:))
+              expect(updated_go_mod_content)
+                .to include(%(rsc.io/quote v1.5.2/go.mod h1:))
+            end
+
+            it "falls back to go mod tidy -e and removes old entries" do
+              expect(updated_go_mod_content)
+                .not_to include(%(rsc.io/quote v1.4.0 h1:))
+              expect(updated_go_mod_content)
+                .not_to include(%(rsc.io/quote v1.4.0/go.mod h1:))
+            end
+          end
+
           describe "a non-existent dependency with a pseudo-version" do
             let(:project_name) { "non_existent_dependency" }
 

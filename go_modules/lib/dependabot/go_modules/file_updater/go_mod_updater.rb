@@ -271,13 +271,7 @@ module Dependabot
 
           workspace_module_paths.each do |mod_path|
             Dir.chdir(mod_path) do
-              command = "go mod tidy -e"
-              _, stderr, status = Open3.capture3(command)
-              if status.success?
-                Dependabot.logger.info "`go mod tidy` succeeded in #{mod_path}"
-              else
-                Dependabot.logger.info "Failed to `go mod tidy` in #{mod_path}: #{stderr}"
-              end
+              run_go_mod_tidy
             end
           end
         end
@@ -336,18 +330,38 @@ module Dependabot
         def run_go_mod_tidy
           return unless tidy?
 
-          command = "go mod tidy -e"
-
-          # we explicitly don't raise an error for 'go mod tidy' and silently
-          # continue with an info log here. `go mod tidy` shouldn't block
-          # updating versions because there are some edge cases where it's OK to fail
-          # (such as generated files not available yet to us).
-          _, stderr, status = Open3.capture3(command)
+          # Try strict `go mod tidy` first — it produces correct go.sum
+          # checksums. If it fails (e.g. generated files not available),
+          # fall back to `go mod tidy -e` which ignores missing packages.
+          # We don't raise an error for either because `go mod tidy` shouldn't
+          # block updating versions.
+          command, _, stderr, status = go_mod_tidy
           if status.success?
-            Dependabot.logger.info "`go mod tidy` succeeded"
-          else
-            Dependabot.logger.info "Failed to `go mod tidy`: #{stderr}"
+            Dependabot.logger.info "`#{command}` succeeded"
+            return
           end
+
+          Dependabot.logger.info "`#{command}` failed (#{stderr.strip}), retrying with -e flag"
+
+          command, _, stderr, status = go_mod_tidy(fallback: true)
+          if status.success?
+            Dependabot.logger.info "`#{command}` succeeded"
+          else
+            Dependabot.logger.info "Failed to `#{command}`: #{stderr}"
+          end
+        end
+
+        # Runs `go mod tidy` and returns the command and captured output.
+        # When fallback is true, uses `-e` flag to ignore errors from
+        # missing packages (e.g. generated files not available).
+        sig do
+          params(fallback: T::Boolean)
+            .returns([String, String, String, Process::Status])
+        end
+        def go_mod_tidy(fallback: false)
+          command = fallback ? "go mod tidy -e" : "go mod tidy"
+          stdout, stderr, status = Open3.capture3(command)
+          [command, stdout, stderr, status]
         end
 
         sig { void }
