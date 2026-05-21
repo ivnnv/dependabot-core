@@ -271,7 +271,7 @@ module Dependabot
 
           workspace_module_paths.each do |mod_path|
             Dir.chdir(mod_path) do
-              run_go_mod_tidy
+              run_go_mod_tidy(context: mod_path)
             end
           end
         end
@@ -326,9 +326,11 @@ module Dependabot
           results
         end
 
-        sig { void }
-        def run_go_mod_tidy
+        sig { params(context: T.nilable(String)).void }
+        def run_go_mod_tidy(context: nil)
           return unless tidy?
+
+          label = context ? " in #{context}" : ""
 
           # Try strict `go mod tidy` first — it produces correct go.sum
           # checksums. If it fails (e.g. generated files not available),
@@ -337,17 +339,17 @@ module Dependabot
           # block updating versions.
           command, _, stderr, status = go_mod_tidy
           if status.success?
-            Dependabot.logger.info "`#{command}` succeeded"
+            Dependabot.logger.info "`#{command}` succeeded#{label}"
             return
           end
 
-          Dependabot.logger.info "`#{command}` failed (#{stderr.strip}), retrying with -e flag"
+          Dependabot.logger.info "`#{command}` failed#{label} (#{stderr.strip}), retrying with -e flag"
 
           command, _, stderr, status = go_mod_tidy(fallback: true)
           if status.success?
-            Dependabot.logger.info "`#{command}` succeeded"
+            Dependabot.logger.info "`#{command}` succeeded#{label}"
           else
-            Dependabot.logger.info "Failed to `#{command}`: #{stderr}"
+            Dependabot.logger.info "Failed to `#{command}`#{label}: #{stderr}"
           end
         end
 

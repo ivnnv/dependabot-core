@@ -289,6 +289,13 @@ RSpec.describe Dependabot::GoModules::FileUpdater::GoModUpdater do
               end
             end
 
+            it "tries strict tidy first then falls back to -e" do
+              updated_go_mod_content
+
+              expect(Open3).to have_received(:capture3).with("go mod tidy").at_least(:once)
+              expect(Open3).to have_received(:capture3).with("go mod tidy -e").at_least(:once)
+            end
+
             it "falls back to go mod tidy -e and still updates go.sum" do
               expect(updated_go_mod_content)
                 .to include(%(rsc.io/quote v1.5.2 h1:))
